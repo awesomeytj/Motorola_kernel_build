@@ -34,7 +34,12 @@ jobs:
       - name: KernelSU-Next
         run: |
           cd kernel-source
-          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/stable/kernel/setup.sh" | bash -s
+          # Clone via git (stable transport) instead of piping setup.sh from
+          # raw.githubusercontent.com, which rate-limits (HTTP 429) and gets its
+          # error page executed by `bash`. Full clone (no --depth) so setup.sh
+          # can `git describe --tags` and check out the latest release.
+          git clone https://github.com/rifsxd/KernelSU-Next.git
+          sh KernelSU-Next/kernel/setup.sh
           cd ..
 
       - name: Add Droidspaces kernel config

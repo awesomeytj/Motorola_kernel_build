@@ -15,14 +15,16 @@ bash: line 1: 404:: command not found
 Error: Process completed with exit code 127.
 ```
 
-**根因**：KernelSU-Next 已将默认分支从 `next` 改名为 `stable`，旧的 setup.sh URL（`refs/heads/next/…`）返回一个 GitHub 404 页面。`curl | bash` 把页面里的 "404: Not Found" 文本当成命令执行，于是报 `404: command not found`。此外 `bash -s next` 传入的 `next` 作为 git tag/commit 也已不存在。
+**根因**：`raw.githubusercontent.com` 不可靠——会限流并返回错误页（先是 404，因为默认分支从 `next` 改名为 `stable`；换成 `stable` 后又遇到 `429: Too Many Requests`）。`curl | bash` 把错误页文本当命令执行，于是报 `404: command not found` / `429: command not found`。
 
-**改动**（`.github/workflows/Build Kernel (KernelSU-Next).yml`）：
+**改动**（`.github/workflows/Build Kernel (KernelSU-Next).yml`）：改用 `git clone`（走稳定传输通道，不受 raw URL 限流影响）拉取 KernelSU-Next，再从本地磁盘执行 setup.sh：
 
-| 改动前 | 改动后 |
-|--------|--------|
-| `.../KernelSU-Next/refs/heads/next/kernel/setup.sh` | `.../KernelSU-Next/stable/kernel/setup.sh` |
-| `\| bash -s next` | `\| bash -s`（默认检出最新 tagged release） |
+```bash
+git clone https://github.com/rifsxd/KernelSU-Next.git   # 完整克隆，不加 --depth
+sh KernelSU-Next/kernel/setup.sh                         # 自动检出最新 release tag
+```
+
+> 注意：必须用**完整克隆**。浅克隆（`--depth=1`）下没有 tag，setup.sh 的 `git describe --tags` 会失败，导致停在未指定提交上。本地实测完整克隆能正确检出最新发布版（当前 v3.3.0）。
 
 ---
 

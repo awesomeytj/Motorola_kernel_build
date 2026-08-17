@@ -60,6 +60,13 @@ jobs:
           # bare macro fails to expand -> "parameter list without types" error.
           # Gate it so it is only emitted on kernels that actually have it (>=5.4).
           sed -i '/^#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)$/,/^#endif$/{s/^#else$/#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)/}' KernelSU/kernel/ksu.c
+          # allowlist.c uses two APIs that differ on this 4.19 kernel:
+          #  - TWA_RESUME (task_work_add's 3rd arg enum) only exists since 5.8;
+          #    on 4.19 the arg is a plain bool, so pass `true`.
+          #  - put_task_struct() is declared in <linux/sched/task.h>, which
+          #    allowlist.c does not include on 4.19 -> implicit declaration.
+          sed -i '/#include <linux\/task_work.h>/a #include <linux/sched/task.h>' KernelSU/kernel/allowlist.c
+          sed -i 's@^\( *\)task_work_add(tsk, cb, TWA_RESUME);@#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)\n\1task_work_add(tsk, cb, TWA_RESUME);\n#else\n\1task_work_add(tsk, cb, true);\n#endif@' KernelSU/kernel/allowlist.c
           cd ..
 
       - name: Add Droidspaces kernel config

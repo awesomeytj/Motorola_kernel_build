@@ -73,6 +73,17 @@ clang: error while loading shared libraries: libtinfo.so.5: cannot open shared o
 
 → 从 Ubuntu 安全源 pool 直接抓取 `libtinfo5` + `libncurses5` 的 `.deb` 安装。deb 文件名在运行时用 `curl + grep + sort -V` 动态解析，避免写死版本号在 pool 清理旧版后 404。本地已验证：解析出的 deb 有效，分别包含 `libtinfo.so.5` 和 `libncurses.so.5`。
 
+**问题 7 — `allowlist.c` 两处 4.19 API 差异**：clang 起来后编译跑了 11 分钟、编过大量内核代码，卡在 KernelSU 的 `allowlist.c`：
+```
+allowlist.c:424:28: error: use of undeclared identifier 'TWA_RESUME'
+allowlist.c:427:5: error: implicit declaration of function 'put_task_struct'
+```
+两个独立的兼容问题（已对照 4.19 内核头文件确认）：
+- `TWA_RESUME` 是枚举常量，内核 **5.8** 才引入。4.19 的 `task_work_add()` 第三参数是 `bool`（`int task_work_add(..., bool)`），应传 `true`。
+- `put_task_struct()` 由 `<linux/sched/task.h>` 声明，但 `allowlist.c` 没 include 它（新内核靠间接引入，4.19 不行）。
+
+→ 在 workflow 里用两条 `sed` 补丁：① 在 `allowlist.c` 补 `#include <linux/sched/task.h>`；② 用 `#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)` 把 `TWA_RESUME` 调用门控起来，<5.8 走 `task_work_add(tsk, cb, true)`。本地已验证 sed 精准命中、`version.h` 已 include（`KERNEL_VERSION` 宏可用）。
+
 ---
 
 ## 二、新增 Droidspaces 内核配置

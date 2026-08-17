@@ -42,6 +42,11 @@ jobs:
           # feeds its error page to bash). setup.sh takes the tag as an argument.
           git clone https://github.com/tiann/KernelSU.git
           sh KernelSU/kernel/setup.sh v2.1.2
+          # v2.1.2 emits MODULE_IMPORT_NS() unconditionally for kernels < 6.13,
+          # but that macro only exists since kernel 5.4. On this 4.19 kernel the
+          # bare macro fails to expand -> "parameter list without types" error.
+          # Gate it so it is only emitted on kernels that actually have it (>=5.4).
+          sed -i '/^#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)$/,/^#endif$/{s/^#else$/#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)/}' KernelSU/kernel/ksu.c
           cd ..
 
       - name: Add Droidspaces kernel config

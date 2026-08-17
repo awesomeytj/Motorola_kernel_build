@@ -39,6 +39,21 @@ sh KernelSU/kernel/setup.sh v2.1.2                 # 显式锁定 4.19 兼容版
 
 > 本地已在真实内核树副本上验证：v2.1.2 正确检出，symlink / drivers Makefile / Kconfig 均正确接入，`sucompat.c` 无 `pgtable.h` 引用。
 
+**问题 4 — v2.1.2 的 `MODULE_IMPORT_NS` 未对 <5.4 内核做门控**：换到 v2.1.2 后 pgtable.h 问题消失，但 Build kernel 阶段又报
+```
+drivers/kernelsu/ksu.c:80:18: error: a parameter list without types is only allowed in a function definition
+```
+对应源码：
+```c
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
+MODULE_IMPORT_NS("VFS_internal_..._NOT_a_driver");
+#else
+MODULE_IMPORT_NS(VFS_internal_..._NOT_a_driver);   // <- 4.19 没有这个宏
+#endif
+```
+`MODULE_IMPORT_NS` 宏是内核 **5.4** 才引入的。v2.1.2 的作者只区分了 6.13+（带引号）和更早（不带引号），没考虑 <5.4 根本没有这个宏——在 4.19 上裸宏无法展开，被当成 K&R 函数声明报错。（已确认该宏在 4.19 内核树中不存在。）
+→ 在 workflow 里 clone KernelSU 后用 `sed` 把 `#else` 改成 `#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)`，让这行只在 ≥5.4 的内核上生成，4.19 直接跳过。该宏仅在编成模块（`.ko`）时有意义，此处是 built-in（`CONFIG_KSU=y`），跳过无副作用。本地已验证 sed 精准命中且不破坏代码块结构。
+
 ---
 
 ## 二、新增 Droidspaces 内核配置

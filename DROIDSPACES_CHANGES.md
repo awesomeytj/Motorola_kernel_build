@@ -54,6 +54,18 @@ MODULE_IMPORT_NS(VFS_internal_..._NOT_a_driver);   // <- 4.19 没有这个宏
 `MODULE_IMPORT_NS` 宏是内核 **5.4** 才引入的。v2.1.2 的作者只区分了 6.13+（带引号）和更早（不带引号），没考虑 <5.4 根本没有这个宏——在 4.19 上裸宏无法展开，被当成 K&R 函数声明报错。（已确认该宏在 4.19 内核树中不存在。）
 → 在 workflow 里 clone KernelSU 后用 `sed` 把 `#else` 改成 `#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)`，让这行只在 ≥5.4 的内核上生成，4.19 直接跳过。该宏仅在编成模块（`.ko`）时有意义，此处是 built-in（`CONFIG_KSU=y`），跳过无副作用。本地已验证 sed 精准命中且不破坏代码块结构。
 
+**问题 5 — runner 镜像移除了 `python2` / `libncurses5`**：Setup environment 阶段报
+```
+E: Package 'python2' has no installation candidate
+E: Unable to locate package libncurses5
+```
+GitHub 的 `ubuntu-22.04` runner 镜像已向 24.04 靠拢，把 `python2` 和 `libncurses5` 移除了（之前能装、现在不行）。经核对本地内核树：
+- `python2` 唯一的消费者是 `scripts/gcc-wrapper.py`（Makefile 第 412 行 `CC = $(PYTHON) gcc-wrapper.py $(REAL_CC)`，其中 `REAL_CC=gcc`）。但 `config.env` 传入 `CC=clang`，命令行的 `CC` 覆盖了 Makefile 的赋值，wrapper 根本不会被调用 —— 所以 python2 用不到。
+- `libncurses5` 只有交互式 `menuconfig` 需要，CI 用不到。
+- `libselinux-dev` 在 24.04 仍可安装，保留。
+
+→ 精简为只装 `libselinux-dev`（并改用 `apt-get install -y`，脚本里更稳定）。
+
 ---
 
 ## 二、新增 Droidspaces 内核配置

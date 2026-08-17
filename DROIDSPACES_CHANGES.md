@@ -59,12 +59,19 @@ MODULE_IMPORT_NS(VFS_internal_..._NOT_a_driver);   // <- 4.19 没有这个宏
 E: Package 'python2' has no installation candidate
 E: Unable to locate package libncurses5
 ```
-GitHub 的 `ubuntu-22.04` runner 镜像已向 24.04 靠拢，把 `python2` 和 `libncurses5` 移除了（之前能装、现在不行）。经核对本地内核树：
-- `python2` 唯一的消费者是 `scripts/gcc-wrapper.py`（Makefile 第 412 行 `CC = $(PYTHON) gcc-wrapper.py $(REAL_CC)`，其中 `REAL_CC=gcc`）。但 `config.env` 传入 `CC=clang`，命令行的 `CC` 覆盖了 Makefile 的赋值，wrapper 根本不会被调用 —— 所以 python2 用不到。
-- `libncurses5` 只有交互式 `menuconfig` 需要，CI 用不到。
+GitHub 的 `ubuntu-22.04` runner 镜像已向 24.04 靠拢（ncurses 从 5 升到 6），把 `python2`、`libncurses5`、`libtinfo5` 都移除了（之前能装、现在不行）。经核对本地内核树：
+- `python2` 唯一的消费者是 `scripts/gcc-wrapper.py`（Makefile 第 412 行 `CC = $(PYTHON) gcc-wrapper.py $(REAL_CC)`，其中 `REAL_CC=gcc`）。但 `config.env` 传入 `CC=clang`，命令行的 `CC` 覆盖了 Makefile 的赋值，wrapper 根本不会被调用 —— 所以 python2 确实用不到，直接去掉。
 - `libselinux-dev` 在 24.04 仍可安装，保留。
 
-→ 精简为只装 `libselinux-dev`（并改用 `apt-get install -y`，脚本里更稳定）。
+→ 先只去掉 python2、保留 selinux。
+
+**问题 6 — 预编译 clang 需要 `libtinfo.so.5`（问题 5 修复的直接后果）**：去掉 `libncurses5` 后 Build kernel 阶段 `clang -v` 立刻报
+```
+clang: error while loading shared libraries: libtinfo.so.5: cannot open shared object file: No such file or directory
+```
+原来 `libncurses5` **不是**给 menuconfig 用的（这是问题 5 里的误判）——`Snapdragon-LLVM` 这个预编译 clang 动态链接了 ncurses 5 的 `libtinfo.so.5` / `libncurses.so.5`，24.04 只有 ncurses 6，故运行时找不到 so。
+
+→ 从 Ubuntu 安全源 pool 直接抓取 `libtinfo5` + `libncurses5` 的 `.deb` 安装。deb 文件名在运行时用 `curl + grep + sort -V` 动态解析，避免写死版本号在 pool 清理旧版后 404。本地已验证：解析出的 deb 有效，分别包含 `libtinfo.so.5` 和 `libncurses.so.5`。
 
 ---
 

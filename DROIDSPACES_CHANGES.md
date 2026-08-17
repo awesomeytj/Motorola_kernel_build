@@ -1,6 +1,6 @@
 # Droidspaces 支持改动记录
 
-本次修改目的：让 `Build Kernel (KernelSU-Next)` 工作流能正常编译，并让编出来的内核支持 **Droidspaces**（Linux 容器运行时）。
+本次修改目的：让 `Build Kernel (KernelSU)` 工作流能正常编译，并让编出来的内核支持 **Droidspaces**（Linux 容器运行时）。
 
 目标设备：`Aessd/kernel_motorola_sm8250`（sm8250 "nio"，内核 **4.19，非 GKI**），属于 Droidspaces 官方文档里最简单的配置路径。
 
@@ -8,23 +8,36 @@
 
 ## 一、修复构建报错
 
-**报错现象**（KernelSU-Next 阶段）：
+**报错现象**（KernelSU 阶段）：
 
 ```
 bash: line 1: 404:: command not found
 Error: Process completed with exit code 127.
 ```
 
-**根因**：`raw.githubusercontent.com` 不可靠——会限流并返回错误页（先是 404，因为默认分支从 `next` 改名为 `stable`；换成 `stable` 后又遇到 `429: Too Many Requests`）。`curl | bash` 把错误页文本当命令执行，于是报 `404: command not found` / `429: command not found`。
+这一阶段经历了三个逐步排查出的问题：
 
-**改动**（`.github/workflows/Build Kernel (KernelSU-Next).yml`）：改用 `git clone`（走稳定传输通道，不受 raw URL 限流影响）拉取 KernelSU-Next，再从本地磁盘执行 setup.sh：
+**问题 1 — raw URL 限流**：原脚本用 `curl raw.githubusercontent.com/.../setup.sh | bash`。该地址不可靠：先返回 404（默认分支从 `next` 改名为 `stable`），换 `stable` 后又遇到 `429: Too Many Requests`。`curl | bash` 把错误页文本当命令执行，于是报 `404:` / `429: command not found`。
+→ 改用 `git clone`（走稳定传输通道，不受 raw URL 限流影响）。
+
+**问题 2 — 浅克隆无 tag**：`git clone --depth=1` 下没有 tag，setup.sh 的 `git describe --tags` 失败，会停在未指定提交上。
+→ 改用完整克隆。
+
+**问题 3 — KernelSU 版本与 4.19 不兼容（真正卡住构建的原因）**：Build kernel 阶段报
+```
+drivers/kernelsu/feature/sucompat.c:7:10: fatal error: 'linux/pgtable.h' file not found
+```
+`linux/pgtable.h` 是内核 **5.8** 才引入的头文件，4.19 没有。KernelSU-Next v3.x 及其 legacy 系列、tiann/KernelSU v3.x 都无条件 include 了它，因此在 4.19 上必然编译失败。
+→ **改用经典 KernelSU（tiann）并锁定到 `v2.1.2`**：本地逐 tag 排查确认，`v2.1.2` 是最后一个不含 `pgtable.h`、带完整版本门控、能在 4.19 编译的稳定版（`v3.0.0` 起引入该头文件）。
+
+**最终改动**（`.github/workflows/Build Kernel (KernelSU).yml`）：
 
 ```bash
-git clone https://github.com/rifsxd/KernelSU-Next.git   # 完整克隆，不加 --depth
-sh KernelSU-Next/kernel/setup.sh                         # 自动检出最新 release tag
+git clone https://github.com/tiann/KernelSU.git   # 经典 KernelSU，完整克隆
+sh KernelSU/kernel/setup.sh v2.1.2                 # 显式锁定 4.19 兼容版本
 ```
 
-> 注意：必须用**完整克隆**。浅克隆（`--depth=1`）下没有 tag，setup.sh 的 `git describe --tags` 会失败，导致停在未指定提交上。本地实测完整克隆能正确检出最新发布版（当前 v3.3.0）。
+> 本地已在真实内核树副本上验证：v2.1.2 正确检出，symlink / drivers Makefile / Kconfig 均正确接入，`sucompat.c` 无 `pgtable.h` 引用。
 
 ---
 
@@ -66,21 +79,21 @@ setup.sh 只接好了 `drivers/` 下的 Kconfig 与 Makefile，并不会自动�
 make ${args} olddefconfig
 ```
 
-确保 KernelSU-Next 真正编进内核。
+确保 KernelSU 真正编进内核。
 
 ---
 
 ## 需要注意
 
 - **`CONFIG_ANDROID_PARANOID_NETWORK=n`**：Droidspaces 容器联网必需。会改变 Android 网络栈对 socket 权限的门控行为，自定义内核上通常没问题，但属于行为变更。
-- **未在本地验证**：受 GitHub 限流影响，未能本地拉取目标内核源码实测合并结果。`make foo_defconfig frag.config` 的合并语法是 Droidspaces 官方文档推荐的标准做法。请在 GitHub Actions 上手动触发验证。
-- **KernelSU-Next 版本**：当前用最新 tagged release。如需更可控，可将 setup.sh 参数改为固定 tag，例如 `| bash -s v1.0.x`。
+- **KernelSU 版本锁定**：使用经典 KernelSU（tiann）`v2.1.2`。这是最后一个兼容 4.19 内核的版本；`v3.0.0` 起引入 `linux/pgtable.h`（内核 5.8+ 才有），无法在 4.19 编译。升级 KernelSU 前请先确认新版是否支持 4.19。
+- **本地验证范围**：defconfig + 片段的合并、以及 KernelSU v2.1.2 的 setup 接入均已在本地真实内核树副本上验证。完整交叉编译需在 GitHub Actions 上跑（本地无 Snapdragon-LLVM 工具链）。
 
 ---
 
 ## 验证方法
 
-1. 在 GitHub Actions 手动触发 `Build Kernel (KernelSU-Next)` 工作流。
+1. 在 GitHub Actions 手动触发 `Build Kernel (KernelSU)` 工作流。
 2. 构建成功后刷入设备。
 3. 打开 Droidspaces app → Settings（齿轮）→ Requirements → Check Requirements，所有必需项应显示绿勾。
    或终端执行：`su -c droidspaces check`
@@ -90,4 +103,4 @@ make ${args} olddefconfig
 ## 参考
 
 - [Droidspaces Kernel Configuration](https://github.com/MGHazz/Droidspaces/blob/main/Documentation/Kernel-Configuration.md)
-- [KernelSU-Next setup.sh](https://github.com/rifsxd/KernelSU-Next/blob/stable/kernel/setup.sh)
+- [KernelSU (tiann)](https://github.com/tiann/KernelSU) · [v2.1.2 setup.sh](https://github.com/tiann/KernelSU/blob/v2.1.2/kernel/setup.sh)

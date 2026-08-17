@@ -1,4 +1,4 @@
-name: Build Kernel (KernelSU-Next)
+name: Build Kernel (KernelSU)
 
 
 on:
@@ -31,15 +31,17 @@ jobs:
         run: |
           git clone --depth=1 ${{ env.KERNEL_SOURCE }} -b ${{ env.KERNEL_SOURCE_BRANCH }} kernel-source
           
-      - name: KernelSU-Next
+      - name: KernelSU
         run: |
           cd kernel-source
-          # Clone via git (stable transport) instead of piping setup.sh from
-          # raw.githubusercontent.com, which rate-limits (HTTP 429) and gets its
-          # error page executed by `bash`. Full clone (no --depth) so setup.sh
-          # can `git describe --tags` and check out the latest release.
-          git clone https://github.com/rifsxd/KernelSU-Next.git
-          sh KernelSU-Next/kernel/setup.sh
+          # Classic KernelSU (tiann). This is a 4.19 non-GKI kernel; both
+          # KernelSU-Next v3.x and tiann v3.x unconditionally #include <linux/pgtable.h>,
+          # which does not exist before kernel 5.8 -> build fails. v2.1.2 is the
+          # last tiann release that compiles on 4.19 (no pgtable.h, version-gated).
+          # Clone via git (not `curl raw... | bash`, which rate-limits to 429 and
+          # feeds its error page to bash). setup.sh takes the tag as an argument.
+          git clone https://github.com/tiann/KernelSU.git
+          sh KernelSU/kernel/setup.sh v2.1.2
           cd ..
 
       - name: Add Droidspaces kernel config
@@ -60,7 +62,7 @@ jobs:
           clang -v
           # Merge device defconfig + Droidspaces fragment; olddefconfig resolves deps.
           make ${args} ${{ env.KERNEL_CONFIG }} droidspaces.config
-          # Enable KernelSU-Next (setup.sh wired the Kconfig; enable the symbol).
+          # Enable KernelSU (setup.sh wired the Kconfig; enable the symbol).
           ./scripts/config --file ../out/.config --enable CONFIG_KSU
           make ${args} olddefconfig
           make -j$(nproc --all) ${args}

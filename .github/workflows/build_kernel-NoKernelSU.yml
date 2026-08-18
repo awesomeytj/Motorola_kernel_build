@@ -67,6 +67,10 @@ jobs:
       - name: Package kernel
         run: |
           git clone --depth=1 ${{ env.ANYKERNEL_SOURCE }} -b ${{ env.ANYKERNEL_SOURCE_BRANCH }} AnyKernel3 && rm -rf AnyKernel3/.git AnyKernel3/.github AnyKernel3/LICENSE AnyKernel3/README.md
+          # Replace the stock ExampleKernel (Galaxy Nexus) anykernel.sh with our
+          # nio-specific config, otherwise the flasher aborts with
+          # "Unsupported device" and never patches boot.
+          cp "$GITHUB_WORKSPACE/anykernel.sh" AnyKernel3/anykernel.sh
           if [[ -f out/arch/arm64/boot/Image.gz-dtb ]]; then
             cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
           elif [[ -f out/arch/arm64/boot/Image-dtb ]]; then

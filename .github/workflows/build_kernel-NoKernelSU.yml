@@ -116,4 +116,7 @@ jobs:
         with:
           name: kernel_config_droidspaces
           path: out/.config
+          # .config 是点开头的隐藏文件；upload-artifact@v4 (>=4.4) 默认
+          # 排除隐藏文件，不加这行会 "No files were found"。
+          include-hidden-files: true
           if-no-files-found: warn

@@ -86,3 +86,34 @@ CONFIG_IKCONFIG_PROC=y
 - 若日志出现 `[MISS] CONFIG_USER_NS`，说明该符号被 olddefconfig
   反选，需检查 `nio_defconfig` 是否有显式 `# CONFIG_USER_NS is not set`
   或其依赖被关闭。
+
+---
+
+## 六、首次构建结果（rawlog5，2026-08-18 run）
+
+- 内核编译通过，`arch/arm64/boot/Image` 产出，AnyKernel3 包成功上传
+  （21.5 MB，Artifact ID 9334214496）。
+- merge_config 日志确认覆盖生效：
+  ```
+  Value of CONFIG_USER_NS is redefined by fragment .../droidspaces.config:
+  Previous value: # CONFIG_USER_NS is not set
+  New value: CONFIG_USER_NS=y
+  ```
+- "Verify Droidspaces config" 步骤四个符号全绿，olddefconfig 未反选：
+  ```
+  [OK]   CONFIG_USER_NS=y
+  [OK]   CONFIG_IKCONFIG=y
+  [OK]   CONFIG_IKCONFIG_PROC=y
+  [OK]   CONFIG_NAMESPACES=y
+  ```
+  **User namespace 目标达成。**
+
+### 踩坑：.config artifact 首次上传失败
+
+首跑时 `.config` artifact 未传成，日志：
+```
+##[warning]No files were found with the provided path: out/.config.
+```
+原因：`.config` 是点开头隐藏文件，`actions/upload-artifact@v4` (>=4.4)
+默认排除隐藏文件（校验步骤同路径能读到并打印，证明文件确实存在，非路径问题）。
+修复：在该上传步骤加 `include-hidden-files: true`，下次构建即可正常留档。

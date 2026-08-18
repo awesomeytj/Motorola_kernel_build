@@ -82,7 +82,43 @@ allowlist.c:427:5: error: implicit declaration of function 'put_task_struct'
 - `TWA_RESUME` 是枚举常量，内核 **5.8** 才引入。4.19 的 `task_work_add()` 第三参数是 `bool`（`int task_work_add(..., bool)`），应传 `true`。
 - `put_task_struct()` 由 `<linux/sched/task.h>` 声明，但 `allowlist.c` 没 include 它（新内核靠间接引入，4.19 不行）。
 
-→ 在 workflow 里用两条 `sed` 补丁：① 在 `allowlist.c` 补 `#include <linux/sched/task.h>`；② 用 `#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)` 把 `TWA_RESUME` 调用门控起来，<5.8 走 `task_work_add(tsk, cb, true)`。本地已验证 sed 精准命中、`version.h` 已 include（`KERNEL_VERSION` 宏可用）。
+→ 在 workflow 里用 `sed` 补丁：① 在 `allowlist.c` 补 `#include <linux/sched/task.h>`；② `TWA_RESUME` 改为在共享头 `allowlist.h` 里定义兼容宏（见下）。
+
+**问题 8 — `app_profile.c` 的 `filter_count`，以及一次前瞻性排查**：allowlist.c 过了之后又报
+```
+app_profile.c:71:31: error: no member named 'filter_count' in 'struct seccomp'
+```
+4.19 的 `struct seccomp` 只有 `mode` 和 `filter`；`filter_count` 是内核 **5.9** 加的。
+
+这时不再逐个试错，改为**主动扫描** v2.1.2 用到的所有可能缺失符号，对照 4.19 内核头逐一核对，得到完整清单：
+
+| 缺失符号 | 引入版本 | 涉及文件 | 4.19 对策 |
+|---|---|---|---|
+| `filter_count` | 5.9 | app_profile.c | 版本门控跳过 |
+| `TWA_RESUME` | 5.8 | allowlist.c、ksud.c、kernel_umount.c、supercalls.c | 头文件兼容宏 → `true` |
+| `strncpy_from_user_nofault` | 5.8 | ksud.c、sucompat.c、syscall_hook_manager.c（8 处） | 改名为 `strncpy_from_unsafe_user` |
+| `path_umount` | 5.9 | kernel_umount.c | **4.19 无此导出符号，无直接替代** |
+| `clear_syscall_work` | 5.11 | app_profile.c | 已被原代码的 `#if` 保护，安全 |
+
+`TWA_RESUME` 的 4 个调用点形式各异（赋值 / 在 `if` 内 / 缩进不同），逐行包裹很脆弱。改为在它们共同包含的 `allowlist.h` 里加一次兼容宏：
+```c
+#include <linux/version.h>
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0)
+#define TWA_RESUME true
+#endif
+```
+（4.19 的第三参数就是 `bool`，故 `true` 语义正确；已用宿主编译验证宏展开为 1。）
+
+---
+
+## 当前状态与策略决定
+
+`path_umount` 在 4.19 上没有可用替代（它是 KernelSU 隐藏 root 挂载点的功能所需），继续攻下去等于把 v2.1.2 手工移植到 4.19。
+
+**决定：先产出纯 Droidspaces 内核**，把 root 方案后置。
+
+- `.github/workflows/build_kernel-NoKernelSU.yml` → 更新为 **Build Kernel (nio, Droidspaces, no KernelSU)**：复用全部已验证修复（libtinfo5/libncurses5 的 deb 安装、去掉 python2、Droidspaces 配置合并），不含 KernelSU，产物 artifact 名为 `AnyKernel3_droidspaces_nokernelsu`。这是当前推荐使用的工作流。
+- `.github/workflows/Build Kernel (KernelSU).yml` → 保留并已打上全部已解决的补丁（MODULE_IMPORT_NS、put_task_struct、TWA_RESUME 兼容宏、filter_count 门控）。**仍会因 `path_umount` 失败**，留待后续；剩余待解项见上表。
 
 ---
 
@@ -138,10 +174,12 @@ make ${args} olddefconfig
 
 ## 验证方法
 
-1. 在 GitHub Actions 手动触发 `Build Kernel (KernelSU)` 工作流。
-2. 构建成功后刷入设备。
-3. 打开 Droidspaces app → Settings（齿轮）→ Requirements → Check Requirements，所有必需项应显示绿勾。
+1. 在 GitHub Actions 手动触发 **Build Kernel (nio, Droidspaces, no KernelSU)** 工作流（当前推荐；KernelSU 版仍有 `path_umount` 未解）。
+2. 构建成功后从 artifact `AnyKernel3_droidspaces_nokernelsu` 取包，刷入设备。
+3. 打开 Droidspaces app → Settings（齿轮）→ Requirements → Check Requirements，必需项应显示绿勾。
    或终端执行：`su -c droidspaces check`
+
+> Droidspaces 的 Check Requirements 第一项是 **Root access**。纯 Droidspaces 内核本身不提供 root，需另配 root 方案（如 Magisk）后该项才会通过；命名空间、cgroups、devtmpfs、OverlayFS、VETH/Bridge 等内核能力项不依赖 root，应当直接为绿。
 
 ---
 

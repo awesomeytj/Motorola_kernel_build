@@ -64,6 +64,27 @@ jobs:
           make ${args} ${{ env.KERNEL_CONFIG }} droidspaces.config
           make -j$(nproc --all) ${args}
 
+      - name: Verify Droidspaces config (post-olddefconfig)
+        run: |
+          # The build wrote the final resolved .config to out/.config (O=../out
+          # from kernel-source == out/ from repo root). Confirm olddefconfig did
+          # not silently drop symbols we care about.
+          cfg=out/.config
+          echo "=== Droidspaces-relevant symbols in $cfg ==="
+          fail=0
+          for sym in USER_NS IKCONFIG IKCONFIG_PROC NAMESPACES; do
+            line=$(grep -E "^(CONFIG_${sym}=|# CONFIG_${sym} is not set)" "$cfg" || true)
+            if echo "$line" | grep -q "=y"; then
+              echo "[OK]   $line"
+            else
+              echo "[MISS] CONFIG_${sym} -> ${line:-not present}"
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "::warning::One or more expected CONFIG symbols were dropped by olddefconfig (see above)."
+          fi
+
       - name: Package kernel
         run: |
           git clone --depth=1 ${{ env.ANYKERNEL_SOURCE }} -b ${{ env.ANYKERNEL_SOURCE_BRANCH }} AnyKernel3 && rm -rf AnyKernel3/.git AnyKernel3/.github AnyKernel3/LICENSE AnyKernel3/README.md
@@ -89,3 +110,10 @@ jobs:
         with:
           name: AnyKernel3_droidspaces_nokernelsu
           path: AnyKernel3/*
+
+      - name: Upload resolved .config to artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel_config_droidspaces
+          path: out/.config
+          if-no-files-found: warn
